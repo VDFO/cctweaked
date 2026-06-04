@@ -22,6 +22,8 @@ function events.routeEvent(event)
             if activeProcess then
                 local kernel = desktop.getKernel()
                 kernel.sendToProcess(activeProcess, event)
+            else
+                desktop.handleDesktopClick(x, y, button)
             end
         end
         

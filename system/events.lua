@@ -66,10 +66,10 @@ function events.routeEvent(event)
         end
         
     elseif name == "key" or name == "char" or name == "key_up" then
-        local desktop = events.desktop
-        if desktop and desktop.getFocusedProcess() then
+        local focusedProcess = desktop.getFocusedProcess()
+        if focusedProcess then
             local kernel = desktop.getKernel()
-            kernel.sendToProcess(desktop.getFocusedProcess(), event)
+            kernel.sendToProcess(focusedProcess, event)
         end
         
     elseif name == "timer" then
@@ -88,8 +88,9 @@ function events.routeEvent(event)
         
     elseif name == "terminate" then
         local kernel = events.desktop.getKernel()
-        if desktop.getFocusedProcess() then
-            kernel.sendToProcess(desktop.getFocusedProcess(), event)
+        local focusedProcess = desktop.getFocusedProcess()
+        if focusedProcess then
+            kernel.sendToProcess(focusedProcess, event)
         end
     end
 end

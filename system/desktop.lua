@@ -45,6 +45,7 @@ end
 
 function desktop.detectMonitor()
     local settings = config.load()
+    
     if settings.monitorMode == "off" then
         desktop.monitor = nil
         return
@@ -261,9 +262,10 @@ function desktop.focusWindow(id)
     end
     desktop.windows[id].zOrder = maxZ + 1
     
-    if oldFocused and desktop.windows[oldFocused] then
+    if oldFocused and oldFocused ~= id and desktop.windows[oldFocused] then
         desktop.drawWindowChrome(desktop.windows[oldFocused])
     end
+    
     desktop.drawWindowChrome(desktop.windows[id])
     desktop.drawTaskbar()
 end
@@ -364,9 +366,33 @@ function desktop.dragWindow(x, y)
     if newX + win.w - 1 > desktop.screenW then newX = desktop.screenW - win.w + 1 end
     if newY + win.h - 1 > desktop.desktopH then newY = desktop.desktopH - win.h + 1 end
     
-    win.window.reposition(newX, newY)
-    win.x = newX
-    win.y = newY
+    local oldX, oldY = win.x, win.y
+    
+    if newX ~= oldX or newY ~= oldY then
+        win.window.setVisible(false)
+        
+        local t = theme.get()
+        local nativeTerm = term.native()
+        local currentTerm = term.current()
+        
+        if desktop.monitor then
+            nativeTerm = desktop.monitor
+        end
+        
+        for i = 0, win.h - 1 do
+            nativeTerm.setCursorPos(oldX, oldY + i)
+            nativeTerm.setBackgroundColor(t.desktop_bg)
+            nativeTerm.setTextColor(t.desktop_fg)
+            nativeTerm.write(string.rep(" ", win.w))
+        end
+        
+        win.window.reposition(newX, newY)
+        win.x = newX
+        win.y = newY
+        
+        win.window.setVisible(true)
+        win.window.redraw()
+    end
 end
 
 function desktop.endDrag()
@@ -446,10 +472,33 @@ function desktop.launchProgram(prog)
 end
 
 function desktop.handlePeripheralEvent(event)
+    local oldMonitor = desktop.monitor
     desktop.detectMonitor()
+    
+    if oldMonitor and not desktop.monitor then
+        term.redirect(term.native())
+        desktop.screenW, desktop.screenH = term.getSize()
+        desktop.taskbarY = desktop.screenH
+        desktop.desktopH = desktop.screenH - 1
+        desktop.redraw()
+    end
+    
+    if desktop.monitor and not oldMonitor then
+        term.redirect(desktop.monitor)
+        desktop.screenW, desktop.screenH = desktop.monitor.getSize()
+        desktop.taskbarY = desktop.screenH
+        desktop.desktopH = desktop.screenH - 1
+        desktop.redraw()
+    end
 end
 
 function desktop.handleMonitorTouch(event)
+    local monitorName = event[2]
+    local x, y = event[3], event[4]
+    
+    if desktop.monitor and peripheral.getName(desktop.monitor) == monitorName then
+        events.routeEvent({"mouse_click", 1, x, y})
+    end
 end
 
 function desktop.run()
@@ -459,6 +508,44 @@ function desktop.run()
     end
     
     desktop.detectMonitor()
+    
+    if desktop.monitor then
+        desktop.monitor.setTextScale(settings.textScale or 1.0)
+        desktop.monitor.setTextColor(colors.white)
+        desktop.monitor.setBackgroundColor(colors.black)
+        desktop.monitor.clear()
+        
+        local mw, mh = desktop.monitor.getSize()
+        desktop.monitor.setCursorPos(math.floor((mw - 15) / 2) + 1, math.floor(mh / 2))
+        desktop.monitor.setTextColor(colors.lightBlue)
+        desktop.monitor.write("CraftOS Desktop")
+        desktop.monitor.setCursorPos(math.floor((mw - 10) / 2) + 1, math.floor(mh / 2) + 2)
+        desktop.monitor.setTextColor(colors.white)
+        desktop.monitor.write("Loading...")
+        
+        term.redirect(desktop.monitor)
+        
+        desktop.screenW, desktop.screenH = desktop.monitor.getSize()
+        desktop.taskbarY = desktop.screenH
+        desktop.desktopH = desktop.screenH - 1
+        
+        local nativeTerm = term.native()
+        nativeTerm.setBackgroundColor(colors.black)
+        nativeTerm.clear()
+        nativeTerm.setCursorPos(1, 1)
+        nativeTerm.setTextColor(colors.lightBlue)
+        nativeTerm.write("CraftOS Desktop")
+        nativeTerm.setCursorPos(1, 3)
+        nativeTerm.setTextColor(colors.lime)
+        nativeTerm.write("Desktop is running on monitor")
+        nativeTerm.setCursorPos(1, 5)
+        nativeTerm.setTextColor(colors.gray)
+        nativeTerm.write("Monitor: " .. (settings.monitorName or "auto-detected"))
+        nativeTerm.setCursorPos(1, 7)
+        nativeTerm.setTextColor(colors.white)
+        nativeTerm.write("Press Ctrl+T to terminate")
+    end
+    
     desktop.redraw()
     
     events.setDesktop(desktop)

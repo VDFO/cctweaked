@@ -263,6 +263,8 @@ while true do
             end
         elseif key == keys.f5 then
             draw()
+        elseif key == keys.q or key == keys.escape then
+            break
         end
     end
 end

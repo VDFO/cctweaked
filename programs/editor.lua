@@ -325,6 +325,9 @@ while true do
                 currentFile = nil
                 modified = false
                 draw()
+                
+            elseif char == "w" or char == "q" then
+                break
             end
         end
     end

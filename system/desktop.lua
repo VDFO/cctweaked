@@ -28,6 +28,14 @@ desktop.programs = {
     {name = "Chat",         icon = "@",  path = "programs/chat.lua"},
     {name = "Chess",        icon = "#",  path = "programs/chess.lua"},
     {name = "Monitor",      icon = "D",  path = "programs/monitor.lua"},
+    {name = "Snake",        icon = "~",  path = "programs/snake.lua"},
+    {name = "Minesweeper",  icon = "*",  path = "programs/minesweeper.lua"},
+    {name = "Tetris",       icon = "]",  path = "programs/tetris.lua"},
+    {name = "2048",         icon = "8",  path = "programs/2048.lua"},
+    {name = "Tic-Tac-Toe",  icon = "X",  path = "programs/tictactoe.lua"},
+    {name = "System Info",  icon = "i",  path = "programs/sysinfo.lua"},
+    {name = "Music",        icon = ">",  path = "programs/music.lua"},
+    {name = "Notes",        icon = "N",  path = "programs/notes.lua"},
 }
 
 function desktop.getKernel()
@@ -121,16 +129,17 @@ function desktop.drawTaskbar()
     
     local tabX = 8
     for id, tab in pairs(desktop.tabs) do
-        if tabX + #tab.title + 3 > desktop.screenW - 10 then break end
+        if tabX + #tab.title + 5 > desktop.screenW - 10 then break end
         
         local tabBg = (id == desktop.activeTabId) and t.taskbar_active or t.taskbar_bg
         local tabFg = t.taskbar_fg
-        local label = " " .. tab.title .. " "
-        if #label > 12 then label = string.sub(label, 1, 12) .. " " end
+        local label = " " .. tab.title .. " x "
+        if #label > 14 then label = string.sub(label, 1, 14) .. " " end
         
         draw.text(tabX, y, label, tabFg, tabBg)
         tab._tabX = tabX
         tab._tabW = #label
+        tab._closeX = tabX + #label - 2
         tabX = tabX + #label + 1
     end
 end
@@ -250,6 +259,8 @@ function desktop.launchProgram(prog)
             print("\nPress any key to close...")
             os.pullEvent("char")
         end
+        
+        desktop.closeTab(tab.id)
     end
     
     local pid = kernel.spawn(prog.name, processFunc, nil)
@@ -265,6 +276,10 @@ function desktop.handleDesktopClick(x, y, button)
         end
         
         for id, tab in pairs(desktop.tabs) do
+            if tab._closeX and x == tab._closeX then
+                desktop.closeTab(id)
+                return
+            end
             if tab._tabX and x >= tab._tabX and x < tab._tabX + (tab._tabW or 0) then
                 desktop.activateTab(id)
                 return
@@ -337,6 +352,9 @@ function desktop.handleMonitorTouch(event)
 end
 
 function desktop.run()
+    _G._kernel = kernel
+    _G._desktop = desktop
+    
     local settings = config.load()
     if settings.theme then
         theme.apply(settings.theme)

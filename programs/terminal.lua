@@ -73,6 +73,7 @@ while true do
     
     local input = ""
     local cursorPos = 1
+    local quit = false
     
     while true do
         term.setCursorPos(3 + cursorPos - 1, h)
@@ -93,6 +94,11 @@ while true do
             if key == keys.enter then
                 term.setCursorBlink(false)
                 addToScrollback("> " .. input)
+                
+                if input == "exit" or input == "quit" then
+                    quit = true
+                    break
+                end
                 
                 if input ~= "" then
                     table.insert(history, input)
@@ -164,5 +170,9 @@ while true do
                 end
             end
         end
+    end
+    
+    if quit then
+        break
     end
 end

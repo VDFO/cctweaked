@@ -4,8 +4,10 @@ local widget = dofile("lib/widget.lua")
 local w, h = term.getSize()
 
 local function getProcessList()
-    local kernel = dofile("system/kernel.lua")
-    return kernel.list()
+    if _G._kernel then
+        return _G._kernel.list()
+    end
+    return {}
 end
 
 local function draw()
@@ -81,8 +83,9 @@ while true do
             local processes = getProcessList()
             local procIndex = y - 5 + 1
             if processes[procIndex] then
-                local kernel = dofile("system/kernel.lua")
-                kernel.kill(processes[procIndex].id)
+                if _G._kernel then
+                    _G._kernel.kill(processes[procIndex].id)
+                end
                 draw()
             end
         end

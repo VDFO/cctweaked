@@ -28,6 +28,14 @@ local files = {
     {path = "programs/chat.lua", url = BASE_URL .. "/programs/chat.lua"},
     {path = "programs/chess.lua", url = BASE_URL .. "/programs/chess.lua"},
     {path = "programs/monitor.lua", url = BASE_URL .. "/programs/monitor.lua"},
+    {path = "programs/snake.lua", url = BASE_URL .. "/programs/snake.lua"},
+    {path = "programs/minesweeper.lua", url = BASE_URL .. "/programs/minesweeper.lua"},
+    {path = "programs/tetris.lua", url = BASE_URL .. "/programs/tetris.lua"},
+    {path = "programs/2048.lua", url = BASE_URL .. "/programs/2048.lua"},
+    {path = "programs/tictactoe.lua", url = BASE_URL .. "/programs/tictactoe.lua"},
+    {path = "programs/sysinfo.lua", url = BASE_URL .. "/programs/sysinfo.lua"},
+    {path = "programs/music.lua", url = BASE_URL .. "/programs/music.lua"},
+    {path = "programs/notes.lua", url = BASE_URL .. "/programs/notes.lua"},
     
     {path = "assets/wallpaper.nfp", url = BASE_URL .. "/assets/wallpaper.nfp"},
     {path = "user/settings.cfg", url = BASE_URL .. "/user/settings.cfg"},
@@ -40,6 +48,8 @@ local directories = {
     "assets",
     "user",
     "user/documents",
+    "user/notes",
+    "music",
 }
 
 local function printHeader(text)

@@ -193,8 +193,7 @@ while true do
             handleButton("<-")
             draw()
         elseif event[2] == keys.escape then
-            handleButton("C")
-            draw()
+            break
         end
     end
 end

@@ -6,16 +6,14 @@ local draw = dofile("lib/draw.lua")
 
 local desktop = {}
 
-desktop.windows = {}
-desktop.nextWinId = 1
-desktop.focusedWinId = nil
-desktop.dragging = nil
+desktop.tabs = {}
+desktop.nextTabId = 1
+desktop.activeTabId = nil
 desktop.startMenuOpen = false
 desktop.screenW, desktop.screenH = term.getSize()
 desktop.taskbarY = desktop.screenH
 desktop.desktopH = desktop.screenH - 1
 desktop.monitor = nil
-desktop.monitorWindow = nil
 
 desktop.programs = {
     {name = "Terminal",     icon = "T",  path = "programs/terminal.lua"},
@@ -36,9 +34,9 @@ function desktop.getKernel()
     return kernel
 end
 
-function desktop.getFocusedProcess()
-    if desktop.focusedWinId and desktop.windows[desktop.focusedWinId] then
-        return desktop.windows[desktop.focusedWinId].processId
+function desktop.getActiveProcess()
+    if desktop.activeTabId and desktop.tabs[desktop.activeTabId] then
+        return desktop.tabs[desktop.activeTabId].processId
     end
     return nil
 end
@@ -92,17 +90,17 @@ function desktop.drawTaskbar()
     draw.text(desktop.screenW - #clock, y, clock, t.taskbar_fg, t.taskbar_bg)
     
     local tabX = 8
-    for id, win in pairs(desktop.windows) do
-        if tabX + #win.title + 3 > desktop.screenW - 10 then break end
+    for id, tab in pairs(desktop.tabs) do
+        if tabX + #tab.title + 3 > desktop.screenW - 10 then break end
         
-        local tabBg = (id == desktop.focusedWinId) and t.taskbar_active or t.taskbar_bg
-        local tabFg = (id == desktop.focusedWinId) and t.taskbar_fg or t.taskbar_fg
-        local label = " " .. win.title .. " "
+        local tabBg = (id == desktop.activeTabId) and t.taskbar_active or t.taskbar_bg
+        local tabFg = t.taskbar_fg
+        local label = " " .. tab.title .. " "
         if #label > 12 then label = string.sub(label, 1, 12) .. " " end
         
         draw.text(tabX, y, label, tabFg, tabBg)
-        win._tabX = tabX
-        win._tabW = #label
+        tab._tabX = tabX
+        tab._tabW = #label
         tabX = tabX + #label + 1
     end
 end
@@ -135,268 +133,97 @@ function desktop.redraw()
     end
 end
 
-function desktop.getWindowAt(x, y)
-    if y == desktop.taskbarY then
-        return nil
-    end
+function desktop.createTab(title, prog)
+    local id = desktop.nextTabId
+    desktop.nextTabId = desktop.nextTabId + 1
     
-    local sorted = {}
-    for id, win in pairs(desktop.windows) do
-        if win.visible and not win.minimized then
-            table.insert(sorted, win)
-        end
-    end
-    table.sort(sorted, function(a, b) return (a.zOrder or 0) > (b.zOrder or 0) end)
-    
-    for _, win in ipairs(sorted) do
-        if x >= win.x and x < win.x + win.w and y >= win.y and y < win.y + win.h then
-            return win
-        end
-    end
-    return nil
-end
-
-function desktop.createWindow(title, w, h)
-    local id = desktop.nextWinId
-    desktop.nextWinId = desktop.nextWinId + 1
-    
-    local x = math.floor((desktop.screenW - w) / 2) + 1
-    local y = math.max(1, math.floor((desktop.desktopH - h) / 2))
-    
-    if x < 1 then x = 1 end
-    if y < 1 then y = 1 end
-    if w > desktop.screenW then w = desktop.screenW end
-    if h > desktop.desktopH then h = desktop.desktopH end
-    
-    local clientW = w - 2
-    local clientH = h - 3
-    
-    local winObj = window.create(term.current(), x, y, w, h, false)
-    local clientObj = window.create(winObj, 2, 2, clientW, clientH, true)
-    
-    local win = {
+    local tab = {
         id = id,
         title = title,
-        x = x,
-        y = y,
-        w = w,
-        h = h,
-        clientW = clientW,
-        clientH = clientH,
-        window = winObj,
-        clientWindow = clientObj,
         processId = nil,
-        minimized = false,
-        visible = true,
-        zOrder = id,
+        prog = prog,
     }
     
-    desktop.windows[id] = win
-    desktop.focusWindow(id)
+    desktop.tabs[id] = tab
+    desktop.activateTab(id)
     
-    return win
+    return tab
 end
 
-function desktop.drawWindowChrome(win)
-    local t = theme.get()
-    local isActive = (win.id == desktop.focusedWinId)
+function desktop.activateTab(id)
+    if not desktop.tabs[id] then return end
     
-    win.window.setVisible(false)
+    local oldActive = desktop.activeTabId
+    desktop.activeTabId = id
     
-    local oldTerm = term.redirect(win.window)
-    
-    local bg = t.window_bg
-    local fg = t.window_fg
-    local borderC = t.border_color
-    
-    term.setBackgroundColor(bg)
-    term.clear()
-    
-    for i = 0, win.h - 1 do
-        term.setCursorPos(1, i + 1)
-        term.setBackgroundColor(borderC)
-        term.write(" ")
-        term.setCursorPos(win.w, i + 1)
-        term.write(" ")
-        term.setBackgroundColor(bg)
+    if oldActive and oldActive ~= id and desktop.tabs[oldActive] then
+        local oldTab = desktop.tabs[oldActive]
+        if oldTab.processId and kernel.processes[oldTab.processId] then
+            kernel.processes[oldTab.processId].state = "waiting"
+        end
     end
     
-    term.setBackgroundColor(borderC)
-    term.setCursorPos(1, win.h)
-    term.write(string.rep(" ", win.w))
-    
-    local titleBg = isActive and t.titlebar_bg or t.titlebar_inactive_bg
-    local titleFg = isActive and t.titlebar_fg or t.titlebar_inactive_fg
-    
-    term.setBackgroundColor(titleBg)
-    term.setTextColor(titleFg)
-    term.setCursorPos(2, 1)
-    
-    local maxTitleLen = win.w - 6
-    local displayTitle = win.title
-    if #displayTitle > maxTitleLen then
-        displayTitle = string.sub(displayTitle, 1, maxTitleLen - 3) .. "..."
-    end
-    term.write(displayTitle)
-    
-    local closeX = win.w - 1
-    term.setCursorPos(closeX - 3, 1)
-    term.write("[_]")
-    term.setCursorPos(closeX, 1)
-    term.write("X")
-    
-    term.redirect(oldTerm)
-    win.window.setVisible(true)
-    win.window.redraw()
-end
-
-function desktop.focusWindow(id)
-    if not desktop.windows[id] then return end
-    
-    local oldFocused = desktop.focusedWinId
-    desktop.focusedWinId = id
-    
-    local maxZ = 0
-    for _, win in pairs(desktop.windows) do
-        if win.zOrder and win.zOrder > maxZ then maxZ = win.zOrder end
-    end
-    desktop.windows[id].zOrder = maxZ + 1
-    
-    if oldFocused and oldFocused ~= id and desktop.windows[oldFocused] then
-        desktop.drawWindowChrome(desktop.windows[oldFocused])
+    local newTab = desktop.tabs[id]
+    if newTab.processId and kernel.processes[newTab.processId] then
+        kernel.processes[newTab.processId].state = "ready"
     end
     
-    desktop.drawWindowChrome(desktop.windows[id])
     desktop.drawTaskbar()
 end
 
-function desktop.closeWindow(id)
-    local win = desktop.windows[id]
-    if not win then return end
+function desktop.closeTab(id)
+    local tab = desktop.tabs[id]
+    if not tab then return end
     
-    if win.processId then
-        kernel.kill(win.processId)
+    if tab.processId then
+        kernel.kill(tab.processId)
     end
     
-    win.window.setVisible(false)
-    desktop.windows[id] = nil
+    desktop.tabs[id] = nil
     
-    if desktop.focusedWinId == id then
-        desktop.focusedWinId = nil
-        local maxZ = 0
-        local topId = nil
-        for wid, w in pairs(desktop.windows) do
-            if w.visible and not w.minimized and (w.zOrder or 0) > maxZ then
-                maxZ = w.zOrder or 0
-                topId = wid
-            end
+    if desktop.activeTabId == id then
+        desktop.activeTabId = nil
+        local firstId = nil
+        for tid, _ in pairs(desktop.tabs) do
+            firstId = tid
+            break
         end
-        if topId then
-            desktop.focusWindow(topId)
+        if firstId then
+            desktop.activateTab(firstId)
+        else
+            desktop.redraw()
         end
-    end
-    
-    desktop.redraw()
-end
-
-function desktop.minimizeWindow(id)
-    local win = desktop.windows[id]
-    if not win then return end
-    
-    win.minimized = true
-    win.window.setVisible(false)
-    
-    if desktop.focusedWinId == id then
-        desktop.focusedWinId = nil
-        local maxZ = 0
-        local topId = nil
-        for wid, w in pairs(desktop.windows) do
-            if w.visible and not w.minimized and (w.zOrder or 0) > maxZ then
-                maxZ = w.zOrder or 0
-                topId = wid
-            end
-        end
-        if topId then
-            desktop.focusWindow(topId)
-        end
-    end
-    
-    desktop.redraw()
-end
-
-function desktop.restoreWindow(id)
-    local win = desktop.windows[id]
-    if not win then return end
-    
-    win.minimized = false
-    win.window.setVisible(true)
-    desktop.focusWindow(id)
-    desktop.redraw()
-end
-
-function desktop.startDrag(id, x, y)
-    local win = desktop.windows[id]
-    if not win then return end
-    
-    desktop.dragging = {
-        id = id,
-        offsetX = x - win.x,
-        offsetY = y - win.y,
-    }
-end
-
-function desktop.isDragging()
-    return desktop.dragging ~= nil
-end
-
-function desktop.dragWindow(x, y)
-    if not desktop.dragging then return end
-    
-    local win = desktop.windows[desktop.dragging.id]
-    if not win then
-        desktop.dragging = nil
-        return
-    end
-    
-    local newX = x - desktop.dragging.offsetX
-    local newY = y - desktop.dragging.offsetY
-    
-    if newX < 1 then newX = 1 end
-    if newY < 1 then newY = 1 end
-    if newX + win.w - 1 > desktop.screenW then newX = desktop.screenW - win.w + 1 end
-    if newY + win.h - 1 > desktop.desktopH then newY = desktop.desktopH - win.h + 1 end
-    
-    local oldX, oldY = win.x, win.y
-    
-    if newX ~= oldX or newY ~= oldY then
-        win.window.setVisible(false)
-        
-        local t = theme.get()
-        local nativeTerm = term.native()
-        local currentTerm = term.current()
-        
-        if desktop.monitor then
-            nativeTerm = desktop.monitor
-        end
-        
-        for i = 0, win.h - 1 do
-            nativeTerm.setCursorPos(oldX, oldY + i)
-            nativeTerm.setBackgroundColor(t.desktop_bg)
-            nativeTerm.setTextColor(t.desktop_fg)
-            nativeTerm.write(string.rep(" ", win.w))
-        end
-        
-        win.window.reposition(newX, newY)
-        win.x = newX
-        win.y = newY
-        
-        win.window.setVisible(true)
-        win.window.redraw()
+    else
+        desktop.drawTaskbar()
     end
 end
 
-function desktop.endDrag()
-    desktop.dragging = nil
+function desktop.launchProgram(prog)
+    local tab = desktop.createTab(prog.name, prog)
+    
+    local processFunc = function()
+        term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.white)
+        term.clear()
+        term.setCursorPos(1, 1)
+        
+        local ok, err = pcall(function()
+            dofile(prog.path)
+        end)
+        
+        if not ok and err and err ~= "Terminated" then
+            term.clear()
+            term.setCursorPos(1, 1)
+            term.setTextColor(colors.red)
+            print("Error: " .. tostring(err))
+            term.setTextColor(colors.white)
+            print("\nPress any key to close...")
+            os.pullEvent("char")
+        end
+    end
+    
+    local pid = kernel.spawn(prog.name, processFunc, nil)
+    tab.processId = pid
 end
 
 function desktop.handleDesktopClick(x, y, button)
@@ -407,13 +234,9 @@ function desktop.handleDesktopClick(x, y, button)
             return
         end
         
-        for id, win in pairs(desktop.windows) do
-            if win._tabX and x >= win._tabX and x < win._tabX + (win._tabW or 0) then
-                if win.minimized then
-                    desktop.restoreWindow(id)
-                else
-                    desktop.focusWindow(id)
-                end
+        for id, tab in pairs(desktop.tabs) do
+            if tab._tabX and x >= tab._tabX and x < tab._tabX + (tab._tabW or 0) then
+                desktop.activateTab(id)
                 return
             end
         end
@@ -442,33 +265,6 @@ function desktop.handleDesktopClick(x, y, button)
         desktop.startMenuOpen = false
         desktop.redraw()
     end
-end
-
-function desktop.launchProgram(prog)
-    local win = desktop.createWindow(prog.name, 30, 15)
-    
-    local processFunc = function()
-        local oldTerm = term.redirect(win.clientWindow)
-        local ok, err = pcall(function()
-            dofile(prog.path)
-        end)
-        term.redirect(oldTerm)
-        
-        if not ok and err and err ~= "Terminated" then
-            local oldTerm2 = term.redirect(win.clientWindow)
-            term.clear()
-            term.setCursorPos(1, 1)
-            term.setTextColor(colors.red)
-            print("Error: " .. tostring(err))
-            term.setTextColor(colors.white)
-            print("\nPress any key to close...")
-            term.redirect(oldTerm2)
-            os.pullEvent("char")
-        end
-    end
-    
-    local pid = kernel.spawn(prog.name, processFunc, win)
-    win.processId = pid
 end
 
 function desktop.handlePeripheralEvent(event)
@@ -554,11 +350,7 @@ function desktop.run()
         while kernel.running do
             local event = table.pack(os.pullEventRaw())
             
-            if event[1] == "mouse_up" then
-                desktop.endDrag()
-            else
-                events.routeEvent(event)
-            end
+            events.routeEvent(event)
             
             kernel.resumeReadyProcesses()
             

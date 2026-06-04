@@ -12,8 +12,9 @@ local capturedWhite = {}
 local capturedBlack = {}
 local gameOver = false
 local gameMode = "local"
-local networkOpponent = nil
-local protocol = "craftos_chess"
+local lastMove = nil
+local enPassantTarget = nil
+local showAnalysis = false
 
 local pieceSymbols = {
     pawn = {white = "P", black = "p"},
@@ -22,6 +23,15 @@ local pieceSymbols = {
     bishop = {white = "B", black = "b"},
     queen = {white = "Q", black = "q"},
     king = {white = "K", black = "k"},
+}
+
+local pieceValues = {
+    pawn = 1,
+    knight = 3,
+    bishop = 3,
+    rook = 5,
+    queen = 9,
+    king = 0,
 }
 
 local function initBoard()
@@ -40,6 +50,9 @@ local function initBoard()
         board[7][x] = {type = "pawn", color = "white"}
         board[8][x] = {type = backRow[x], color = "white"}
     end
+    
+    lastMove = nil
+    enPassantTarget = nil
 end
 
 local function isInBounds(x, y)
@@ -96,6 +109,8 @@ function getRawMoves(x, y, attackOnly)
                     table.insert(moves, {x = x + dx, y = y + dir})
                 elseif attackOnly then
                     table.insert(moves, {x = x + dx, y = y + dir})
+                elseif enPassantTarget and enPassantTarget.x == x + dx and enPassantTarget.y == y + dir then
+                    table.insert(moves, {x = x + dx, y = y + dir, enPassant = true})
                 end
             end
         end
@@ -191,6 +206,14 @@ local function getValidMoves(x, y)
     
     for _, move in ipairs(rawMoves) do
         local captured = board[move.y][move.x]
+        local capturedEnPassant = nil
+        
+        if move.enPassant then
+            local capturedY = (piece.color == "white") and move.y + 1 or move.y - 1
+            capturedEnPassant = board[capturedY][move.x]
+            board[capturedY][move.x] = nil
+        end
+        
         board[move.y][move.x] = piece
         board[y][x] = nil
         
@@ -200,6 +223,11 @@ local function getValidMoves(x, y)
         
         board[y][x] = piece
         board[move.y][move.x] = captured
+        
+        if move.enPassant then
+            local capturedY = (piece.color == "white") and move.y + 1 or move.y - 1
+            board[capturedY][move.x] = capturedEnPassant
+        end
     end
     
     return validMoves
@@ -224,11 +252,33 @@ local function makeMove(fromX, fromY, toX, toY)
     local piece = board[fromY][fromX]
     local captured = board[toY][toX]
     
+    enPassantTarget = nil
+    
+    if piece.type == "pawn" and math.abs(toY - fromY) == 2 then
+        enPassantTarget = {x = fromX, y = (fromY + toY) / 2}
+    end
+    
     if captured then
         if captured.color == "white" then
             table.insert(capturedWhite, captured)
         else
             table.insert(capturedBlack, captured)
+        end
+    end
+    
+    for _, move in ipairs(validMoves) do
+        if move.x == toX and move.y == toY and move.enPassant then
+            local capturedY = (piece.color == "white") and toY + 1 or toY - 1
+            local capturedPawn = board[capturedY][toX]
+            if capturedPawn then
+                if capturedPawn.color == "white" then
+                    table.insert(capturedWhite, capturedPawn)
+                else
+                    table.insert(capturedBlack, capturedPawn)
+                end
+                board[capturedY][toX] = nil
+            end
+            break
         end
     end
     
@@ -238,6 +288,8 @@ local function makeMove(fromX, fromY, toX, toY)
     if piece.type == "pawn" and (toY == 1 or toY == 8) then
         board[toY][toX] = {type = "queen", color = piece.color}
     end
+    
+    lastMove = {fromX = fromX, fromY = fromY, toX = toX, toY = toY}
     
     local moveStr = string.format("%s%s to %s%s",
         string.char(96 + fromX), tostring(9 - fromY),
@@ -260,30 +312,81 @@ local function makeMove(fromX, fromY, toX, toY)
     return "ok"
 end
 
-local function drawBoard()
-    local t = theme.get()
-    term.setBackgroundColor(t.window_bg)
-    term.clear()
-    
-    term.setBackgroundColor(t.titlebar_bg)
-    term.setTextColor(t.titlebar_fg)
-    term.setCursorPos(1, 1)
-    term.write(string.rep(" ", w))
-    term.setCursorPos(2, 1)
-    term.write("Chess")
-    
-    if gameMode == "network" then
-        term.setCursorPos(w - 10, 1)
-        term.write(" Network ")
-    end
-    
-    local boardX = 2
-    local boardY = 3
+local function evaluatePosition()
+    local score = 0
     
     for y = 1, 8 do
         for x = 1, 8 do
-            local screenX = boardX + (x - 1) * 3
-            local screenY = boardY + (y - 1) * 2
+            local piece = board[y][x]
+            if piece then
+                local value = pieceValues[piece.type] or 0
+                if piece.color == "white" then
+                    score = score + value
+                else
+                    score = score - value
+                end
+            end
+        end
+    end
+    
+    return score
+end
+
+local function drawAnalysisBar(eval)
+    local barX = 2
+    local barY = h - 2
+    local barW = w - 4
+    local barH = 1
+    
+    local maxEval = 20
+    local clampedEval = math.max(-maxEval, math.min(maxEval, eval))
+    local whitePercent = (clampedEval + maxEval) / (2 * maxEval)
+    local whiteWidth = math.floor(barW * whitePercent)
+    
+    term.setBackgroundColor(colors.white)
+    term.setCursorPos(barX, barY)
+    term.write(string.rep(" ", whiteWidth))
+    
+    term.setBackgroundColor(colors.black)
+    term.write(string.rep(" ", barW - whiteWidth))
+    
+    term.setCursorPos(barX, barY + 1)
+    term.setBackgroundColor(colors.gray)
+    term.setTextColor(colors.white)
+    
+    local evalText = ""
+    if eval > 0 then
+        evalText = string.format("+%.1f", eval)
+    elseif eval < 0 then
+        evalText = string.format("%.1f", eval)
+    else
+        evalText = "0.0"
+    end
+    
+    term.write(" Evaluation: " .. evalText .. " ")
+end
+
+local function drawBoard()
+    local t = theme.get()
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    
+    local boardSize = math.min(w - 20, h - 4)
+    local cellW = math.floor(boardSize / 8)
+    local cellH = math.floor((boardSize * 0.6) / 8)
+    
+    if cellW < 3 then cellW = 3 end
+    if cellH < 2 then cellH = 2 end
+    
+    local boardW = cellW * 8
+    local boardH = cellH * 8
+    local boardX = math.max(2, math.floor((w - boardW - 15) / 2))
+    local boardY = 2
+    
+    for y = 1, 8 do
+        for x = 1, 8 do
+            local screenX = boardX + (x - 1) * cellW
+            local screenY = boardY + (y - 1) * cellH
             
             local isLight = (x + y) % 2 == 0
             local bgColor = isLight and colors.lightGray or colors.brown
@@ -304,81 +407,91 @@ local function drawBoard()
             end
             
             term.setBackgroundColor(bgColor)
-            term.setCursorPos(screenX, screenY)
-            term.write("   ")
-            term.setCursorPos(screenX, screenY + 1)
-            term.write("   ")
+            for dy = 0, cellH - 1 do
+                term.setCursorPos(screenX, screenY + dy)
+                term.write(string.rep(" ", cellW))
+            end
             
             local piece = board[y][x]
             if piece then
                 local symbol = pieceSymbols[piece.type][piece.color]
                 local pieceColor = (piece.color == "white") and colors.white or colors.black
+                local pieceBg = (piece.color == "white") and colors.black or colors.white
                 
                 term.setTextColor(pieceColor)
-                term.setCursorPos(screenX + 1, screenY)
+                term.setBackgroundColor(pieceBg)
+                term.setCursorPos(screenX + math.floor(cellW / 2), screenY + math.floor(cellH / 2))
                 term.write(symbol)
             end
             
             if isValidMove and not piece then
                 term.setTextColor(colors.white)
-                term.setCursorPos(screenX + 1, screenY)
+                term.setBackgroundColor(bgColor)
+                term.setCursorPos(screenX + math.floor(cellW / 2), screenY + math.floor(cellH / 2))
                 term.write("o")
             end
         end
     end
     
-    term.setBackgroundColor(t.window_bg)
+    term.setBackgroundColor(colors.black)
     term.setTextColor(colors.gray)
     for y = 1, 8 do
-        term.setCursorPos(1, boardY + (y - 1) * 2)
+        term.setCursorPos(boardX - 1, boardY + (y - 1) * cellH + math.floor(cellH / 2))
         term.write(tostring(9 - y))
     end
     
     for x = 1, 8 do
-        term.setCursorPos(boardX + (x - 1) * 3 + 1, boardY + 16)
+        term.setCursorPos(boardX + (x - 1) * cellW + math.floor(cellW / 2), boardY + boardH)
         term.write(string.char(96 + x))
     end
     
-    local infoX = boardX + 26
-    term.setTextColor(t.window_fg)
-    term.setCursorPos(infoX, 3)
+    local infoX = boardX + boardW + 2
+    term.setTextColor(colors.white)
+    term.setCursorPos(infoX, 2)
     term.write("Turn: " .. currentTurn)
     
-    term.setCursorPos(infoX, 5)
+    term.setCursorPos(infoX, 4)
     term.write("Captured:")
     
-    term.setCursorPos(infoX, 6)
+    term.setCursorPos(infoX, 5)
     term.setTextColor(colors.white)
-    term.write("White: ")
+    term.write("W: ")
     for _, piece in ipairs(capturedWhite) do
         term.write(pieceSymbols[piece.type].white)
     end
     
-    term.setCursorPos(infoX, 7)
+    term.setCursorPos(infoX, 6)
     term.setTextColor(colors.black)
-    term.write("Black: ")
+    term.setBackgroundColor(colors.white)
+    term.write("B: ")
     for _, piece in ipairs(capturedBlack) do
         term.write(pieceSymbols[piece.type].black)
     end
     
-    term.setTextColor(t.window_fg)
-    term.setCursorPos(infoX, 9)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.setCursorPos(infoX, 8)
     term.write("Moves:")
     
-    local moveY = 10
-    local startMove = math.max(1, #moveHistory - 8)
+    local moveY = 9
+    local startMove = math.max(1, #moveHistory - 10)
     for i = startMove, #moveHistory do
         term.setCursorPos(infoX, moveY)
         term.write(i .. ". " .. moveHistory[i])
         moveY = moveY + 1
-        if moveY > h - 2 then break end
+        if moveY > h - 4 then break end
     end
     
-    term.setBackgroundColor(t.window_bg)
+    if showAnalysis then
+        local eval = evaluatePosition()
+        drawAnalysisBar(eval)
+    end
+    
+    term.setBackgroundColor(colors.black)
     term.setTextColor(colors.gray)
     term.setCursorPos(2, h)
     if gameOver then
-        term.write("Game Over! Press Q to quit")
+        term.write("Game Over! Press A for analysis, Q to quit, N for new game")
     else
         term.write("Click to select/move | Q to quit | N for new game")
     end
@@ -400,20 +513,20 @@ local function showGameOver(result)
     local msgX = math.floor((w - msgW) / 2)
     local msgY = math.floor((h - msgH) / 2)
     
-    term.setBackgroundColor(t.window_bg)
-    term.setTextColor(t.window_fg)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
     for i = 0, msgH - 1 do
         term.setCursorPos(msgX, msgY + i)
         term.write(string.rep(" ", msgW))
     end
     
-    term.setBackgroundColor(t.titlebar_bg)
-    term.setTextColor(t.titlebar_fg)
+    term.setBackgroundColor(colors.blue)
+    term.setTextColor(colors.white)
     term.setCursorPos(msgX, msgY)
     term.write(string.rep(" ", msgW))
     
-    term.setBackgroundColor(t.window_bg)
-    term.setTextColor(t.window_fg)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
     term.setCursorPos(msgX + 2, msgY + 2)
     term.write(msg)
 end
@@ -431,12 +544,21 @@ while true do
         
         local x, y = event[3], event[4]
         
-        local boardX = 2
-        local boardY = 3
+        local boardSize = math.min(w - 20, h - 4)
+        local cellW = math.floor(boardSize / 8)
+        local cellH = math.floor((boardSize * 0.6) / 8)
         
-        if x >= boardX and x < boardX + 24 and y >= boardY and y < boardY + 16 then
-            local squareX = math.floor((x - boardX) / 3) + 1
-            local squareY = math.floor((y - boardY) / 2) + 1
+        if cellW < 3 then cellW = 3 end
+        if cellH < 2 then cellH = 2 end
+        
+        local boardW = cellW * 8
+        local boardH = cellH * 8
+        local boardX = math.max(2, math.floor((w - boardW - 15) / 2))
+        local boardY = 2
+        
+        if x >= boardX and x < boardX + boardW and y >= boardY and y < boardY + boardH then
+            local squareX = math.floor((x - boardX) / cellW) + 1
+            local squareY = math.floor((y - boardY) / cellH) + 1
             
             if isInBounds(squareX, squareY) then
                 if selectedSquare then
@@ -492,6 +614,10 @@ while true do
             capturedWhite = {}
             capturedBlack = {}
             gameOver = false
+            showAnalysis = false
+            drawBoard()
+        elseif event[2] == keys.a and gameOver then
+            showAnalysis = not showAnalysis
             drawBoard()
         end
     end

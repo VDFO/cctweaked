@@ -15,6 +15,7 @@ local gameMode = "local"
 local lastMove = nil
 local enPassantTarget = nil
 local showAnalysis = false
+local lastGameResult = nil
 
 local pieceSymbols = {
     pawn = {white = "P", black = "p"},
@@ -491,11 +492,13 @@ local function drawBoard()
     term.setTextColor(colors.gray)
     term.setCursorPos(2, h)
     if gameOver then
-        term.write("Game Over! Press A for analysis, Q to quit, N for new game")
+        term.write("Game Over! Click Analysis or Rematch | Q to quit")
     else
         term.write("Click to select/move | Q to quit | N for new game")
     end
 end
+
+local gameOverButtons = {}
 
 local function showGameOver(result)
     local t = theme.get()
@@ -508,8 +511,8 @@ local function showGameOver(result)
         msg = "Stalemate! Draw!"
     end
     
-    local msgW = #msg + 4
-    local msgH = 5
+    local msgW = math.max(#msg + 4, 30)
+    local msgH = 7
     local msgX = math.floor((w - msgW) / 2)
     local msgY = math.floor((h - msgH) / 2)
     
@@ -529,6 +532,39 @@ local function showGameOver(result)
     term.setTextColor(colors.white)
     term.setCursorPos(msgX + 2, msgY + 2)
     term.write(msg)
+    
+    local btnW = 12
+    local btnH = 2
+    local btnY = msgY + 4
+    local btnSpacing = 2
+    local totalBtnW = btnW * 2 + btnSpacing
+    local btnStartX = msgX + math.floor((msgW - totalBtnW) / 2)
+    
+    local analysisBtnX = btnStartX
+    local rematchBtnX = btnStartX + btnW + btnSpacing
+    
+    term.setBackgroundColor(colors.green)
+    term.setTextColor(colors.white)
+    for dy = 0, btnH - 1 do
+        term.setCursorPos(analysisBtnX, btnY + dy)
+        term.write(string.rep(" ", btnW))
+    end
+    term.setCursorPos(analysisBtnX + math.floor((btnW - 8) / 2), btnY + math.floor(btnH / 2))
+    term.write("Analysis")
+    
+    term.setBackgroundColor(colors.orange)
+    term.setTextColor(colors.white)
+    for dy = 0, btnH - 1 do
+        term.setCursorPos(rematchBtnX, btnY + dy)
+        term.write(string.rep(" ", btnW))
+    end
+    term.setCursorPos(rematchBtnX + math.floor((btnW - 7) / 2), btnY + math.floor(btnH / 2))
+    term.write("Rematch")
+    
+    gameOverButtons = {
+        analysis = {x = analysisBtnX, y = btnY, w = btnW, h = btnH},
+        rematch = {x = rematchBtnX, y = btnY, w = btnW, h = btnH},
+    }
 end
 
 initBoard()
@@ -538,11 +574,40 @@ while true do
     local event = table.pack(os.pullEvent())
     
     if event[1] == "mouse_click" then
-        if gameOver then
-            break
-        end
-        
         local x, y = event[3], event[4]
+        
+        if gameOver then
+            if gameOverButtons.analysis then
+                local btn = gameOverButtons.analysis
+                if x >= btn.x and x < btn.x + btn.w and y >= btn.y and y < btn.y + btn.h then
+                    showAnalysis = not showAnalysis
+                    drawBoard()
+                    showGameOver(lastGameResult)
+                end
+            end
+            
+            if gameOverButtons.rematch then
+                local btn = gameOverButtons.rematch
+                if x >= btn.x and x < btn.x + btn.w and y >= btn.y and y < btn.y + btn.h then
+                    initBoard()
+                    selectedSquare = nil
+                    validMoves = {}
+                    currentTurn = "white"
+                    moveHistory = {}
+                    capturedWhite = {}
+                    capturedBlack = {}
+                    gameOver = false
+                    showAnalysis = false
+                    gameOverButtons = {}
+                    lastGameResult = nil
+                    drawBoard()
+                end
+            end
+            
+            if event[2] == 1 and x >= w - 3 and y == 1 then
+                break
+            end
+        else
         
         local boardSize = math.min(w - 20, h - 4)
         local cellW = math.floor(boardSize / 8)
@@ -577,6 +642,7 @@ while true do
                         drawBoard()
                         
                         if result == "checkmate" or result == "stalemate" then
+                            lastGameResult = result
                             showGameOver(result)
                         end
                     else
@@ -600,6 +666,7 @@ while true do
                     end
                 end
             end
+        end
         end
         
     elseif event[1] == "key" then

@@ -65,17 +65,47 @@ function desktop.drawDesktop()
     term.setBackgroundColor(t.desktop_bg)
     term.clear()
     
-    local logo = "CraftOS Desktop"
-    local lx = math.floor((desktop.screenW - #logo) / 2) + 1
-    local ly = math.floor(desktop.desktopH / 2) - 1
+    local iconW = 8
+    local iconH = 3
+    local iconSpacingX = 2
+    local iconSpacingY = 1
+    local startX = 2
+    local startY = 2
+    local iconsPerRow = math.floor((desktop.screenW - startX) / (iconW + iconSpacingX))
     
-    term.setTextColor(t.desktop_fg)
-    term.setCursorPos(lx, ly)
-    term.write(logo)
-    
-    term.setCursorPos(lx, ly + 2)
-    local hint = "Click Start to open programs"
-    term.write(hint)
+    for i, prog in ipairs(desktop.programs) do
+        local row = math.floor((i - 1) / iconsPerRow)
+        local col = (i - 1) % iconsPerRow
+        local x = startX + col * (iconW + iconSpacingX)
+        local y = startY + row * (iconH + iconSpacingY)
+        
+        if y + iconH > desktop.desktopH then break end
+        
+        term.setBackgroundColor(t.button_bg)
+        term.setTextColor(t.button_fg)
+        
+        for dy = 0, iconH - 1 do
+            term.setCursorPos(x, y + dy)
+            term.write(string.rep(" ", iconW))
+        end
+        
+        term.setCursorPos(x + math.floor((iconW - 1) / 2), y + 1)
+        term.write(prog.icon)
+        
+        term.setCursorPos(x, y + iconH - 1)
+        local name = prog.name
+        if #name > iconW then
+            name = string.sub(name, 1, iconW - 1)
+        end
+        local nameX = x + math.floor((iconW - #name) / 2)
+        term.setCursorPos(nameX, y + iconH - 1)
+        term.write(name)
+        
+        prog._iconX = x
+        prog._iconY = y
+        prog._iconW = iconW
+        prog._iconH = iconH
+    end
 end
 
 function desktop.drawTaskbar()
@@ -264,6 +294,15 @@ function desktop.handleDesktopClick(x, y, button)
         
         desktop.startMenuOpen = false
         desktop.redraw()
+        return
+    end
+    
+    for _, prog in ipairs(desktop.programs) do
+        if prog._iconX and x >= prog._iconX and x < prog._iconX + prog._iconW and
+           y >= prog._iconY and y < prog._iconY + prog._iconH then
+            desktop.launchProgram(prog)
+            return
+        end
     end
 end
 
